@@ -1,4 +1,4 @@
-const CACHE = 'jornada-v2';
+const CACHE = 'jornada-v3';
 
 self.addEventListener('install', event => {
   event.waitUntil(
