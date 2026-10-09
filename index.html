@@ -211,6 +211,91 @@ function bonusStatus(c){
 }
 window.showTab=function showTab(t){tab=t;['today','bank','calendar','settings'].forEach(x=>document.getElementById(x).classList.toggle('hidden',x!==t));document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));document.getElementById({today:'nToday',bank:'nBank',calendar:'nCal',settings:'nSet'}[t]).classList.add('active');render()}
 function render(){renderToday();renderBank();renderCalendar();renderSettings()}
+let alertAudioCtx=null;
+let alertTimer=null;
+let lastAlertMinute=-1;
+function alertDayKey(){return todayKey();}
+function alertState(){
+  try{return JSON.parse(localStorage.getItem('jornada_alertas_2h')||'{}')}catch(e){return {}}
+}
+function saveAlertState(st){localStorage.setItem('jornada_alertas_2h',JSON.stringify(st));}
+function resetAlertStateIfNewDay(){
+  let st=alertState(),k=alertDayKey();
+  if(st.day!==k){st={day:k,sent:{}};saveAlertState(st)}
+  return st;
+}
+function ensureAlertAudio(){
+  try{
+    const AC=window.AudioContext||window.webkitAudioContext;
+    if(!AC)return null;
+    if(!alertAudioCtx)alertAudioCtx=new AC();
+    if(alertAudioCtx.state==='suspended')alertAudioCtx.resume();
+    return alertAudioCtx;
+  }catch(e){return null}
+}
+function beep(count=1,urgent=false){
+  const ctx=ensureAlertAudio();
+  if(!ctx)return;
+  const start=ctx.currentTime;
+  for(let i=0;i<count;i++){
+    const o=ctx.createOscillator(),g=ctx.createGain();
+    o.type=urgent?'square':'sine';
+    o.frequency.value=urgent?(i%2?880:660):740;
+    g.gain.setValueAtTime(0.0001,start+i*0.28);
+    g.gain.exponentialRampToValueAtTime(0.18,start+i*0.28+0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001,start+i*0.28+0.20);
+    o.connect(g);g.connect(ctx.destination);o.start(start+i*0.28);o.stop(start+i*0.28+0.22);
+  }
+}
+async function showAlarmNotification(title,body,urgent=false){
+  try{
+    if('Notification' in window && Notification.permission==='granted'){
+      if(navigator.serviceWorker&&navigator.serviceWorker.ready){
+        const reg=await navigator.serviceWorker.ready;
+        if(reg&&reg.showNotification){await reg.showNotification(title,{body,icon:'transpanorama_app_icon.png',badge:'transpanorama_app_icon.png',tag:'jornada-2h',renotify:true,vibrate:[300,150,300],requireInteraction:urgent});return;}
+      }
+      new Notification(title,{body,tag:'jornada-2h',renotify:true});
+    }
+  }catch(e){}
+}
+function fireJourneyAlert(level,extraLive){
+  const st=resetAlertStateIfNewDay();
+  if(st.sent[level])return;
+  // If a later threshold is reached while the app was closed, avoid firing stale alerts in sequence.
+  if(level==='10' && extraLive>=115) return;
+  if(level==='5' && extraLive>=120) return;
+  st.sent[level]=Date.now();saveAlertState(st);
+  const body=level==='10'
+    ?'Faltam 10 minutos para atingir 2h de hora extra. Vá se preparar para bater o ponto.'
+    :'Faltam 5 minutos para atingir 2h de hora extra. Atenção para bater o ponto.';
+  const title=`⚠️ ${level==='10'?'10 minutos':'5 minutos'} para 2h extras`;
+  beep(level==='5'?3:2,level==='5');
+  if(navigator.vibrate)navigator.vibrate(level==='10'?[250,150,250]:[500,200,500,200,500]);
+  showAlarmNotification(title,body,level==='5');
+}
+function checkExtraAlerts(){
+  const k=todayKey(),d=getDay(k),c=calcDay(k);
+  if(!c.ent||c.ex||d.type==='holiday'||d.type==='off'||d.type==='absence')return;
+  const now=new Date();
+  const end=now.getHours()*60+now.getMinutes();
+  const extraLive=Math.max(0,end-hmToMin(c.ent.time)-c.lunch-c.ints-(dow(k)===6?240:480));
+  if(extraLive>=115)fireJourneyAlert('5',extraLive);
+  else if(extraLive>=110)fireJourneyAlert('10',extraLive);
+}
+window.enableJourneyAlerts=async function enableJourneyAlerts(){
+  ensureAlertAudio();
+  let p='unsupported';
+  if('Notification' in window)p=await Notification.requestPermission();
+  const ok=p==='granted'||p==='unsupported';
+  if(ok){localStorage.setItem('jornada_alertas_ativados','1');beep(1,false);alert('Alertas de 2h extras ativados.\n\nVocê será avisado aos 10 minutos e 5 minutos antes das 2h, com aviso na tela, som e vibração quando disponíveis.');}
+  else alert('A permissão de notificações foi recusada. Ative as notificações do aplicativo nas configurações do celular para receber os alertas.');
+};
+function startAlertMonitor(){
+  if(alertTimer)clearInterval(alertTimer);
+  resetAlertStateIfNewDay();
+  alertTimer=setInterval(()=>{if(localStorage.getItem('jornada_alertas_ativados')==='1')checkExtraAlerts();},5000);
+  if(localStorage.getItem('jornada_alertas_ativados')==='1')checkExtraAlerts();
+}
 function renderToday(){
  let k=todayKey(),d=getDay(k),c=calcDay(k),now=new Date();
  let lunchStart=activeEvent(d,'lunch_start'), lunchEnd=activeEvent(d,'lunch_end');
@@ -222,7 +307,7 @@ function renderToday(){
  let status=flags.length?'🔴 BÔNUS EM RISCO':(d.type==='holiday'?'🇧🇷 FERIADO':(c.ent&&!c.ex?'🟢 TRABALHANDO':'🟢 CONTROLE OK'));
  let lunchText=lunchStart&&!lunchEnd?fmtMin(lunchLive):fmtMin(c.lunch);
  let lunchMsg=lunchStart&&!lunchEnd?(lunchLive<60?`🔴 Faltam ${fmtMin(60-lunchLive)} para completar 1h`:'🟢 1h completa — pode retornar'):c.lunch?c.lunch<60?'🔴 INTERVALO ABAIXO DE 1H':'🟢 Intervalo mínimo cumprido':'—';
- let extraMsg=extraLive>=120?'🔴 LIMITE DE 2H ATINGIDO':extraLive>=115?'🟠 Faltam 5 minutos para 2h':extraLive>=110?'🟡 Faltam 10 minutos para 2h':`🟢 Ainda pode fazer ${fmtMin(120-extraLive)}`;
+ let extraMsg=extraLive>=115?'🟠 Faltam 5 minutos para 2h':extraLive>=110?'🟡 Faltam 10 minutos para 2h':`🟢 Ainda pode fazer ${fmtMin(120-extraLive)}`;
  let mc=monthCalc();
  let dailyBalance=c.complete?(c.extra-c.debit):0;
  document.getElementById('today').innerHTML=`<div class="card hero ${heroClass}">
@@ -234,6 +319,7 @@ function renderToday(){
 <div class="metric"><span>Saída</span><b>${c.ex?c.ex.time:'—'}</b></div>
 <div class="metric"><span>Almoço</span><b>${lunchText}</b><span>${lunchMsg}</span></div>
 <div class="metric"><span>Extras</span><b>${fmtMin(extraLive)}</b><span>${extraMsg}</span></div></div>
+<div class="notice" style="margin-top:10px"><b>🚨 Alertas de 2h:</b> ${extraLive>=115?'🟠 Faltam menos de 5 minutos — prepare-se para bater o ponto.':extraLive>=110?'🟡 Faltam menos de 10 minutos — fique atento ao alerta.':'🔔 Avisaremos aos 10 min e 5 min antes das 2h.'}</div>
 <div class="actions" style="margin-top:10px">
 <button class="green" onclick="addEntry()" ${c.ent?'disabled':''}>🟢 ENTRADA</button>
 <button class="red" onclick="addExit()" ${!c.ent||c.ex?'disabled':''}>🏁 SAÍDA</button>
@@ -303,12 +389,13 @@ function renderSettings(){
 <div class="small muted">O mês é apenas uma configuração. O banco não será zerado sozinho: o fechamento precisa ser confirmado por você.</div>
 <div class="small muted">Ciclo atual: ${currentCycleLabel()} · Saldo inicial do ciclo: ${fmtMin(cycleInitialBalance())}</div>
 <br><button class="green" onclick="saveSettings()">💾 Salvar configurações</button>
-<button class="secondary" onclick="notifyPermission()">🔔 Ativar notificações</button>
+<button class="secondary" onclick="enableJourneyAlerts()">🚨 Ativar alertas de 2h extras</button><button class="secondary" onclick="notifyPermission()">🔔 Testar/ativar notificações</button>
 <p class="small muted">📱 Para deixar com acesso de aplicativo, use o menu do navegador e escolha “Adicionar à tela inicial”.<br><br>O controle salva os dados neste aparelho/navegador. Faça backup antes de trocar de celular ou limpar os dados do navegador.</p></div>`;
 }
 window.saveSettings=function saveSettings(){let s=db.settings;s.saldoInicialMin=parseHM(document.getElementById('saldo').value);s.entrada=document.getElementById('ent').value;s.saida=document.getElementById('sai').value;s.almocoPadrao=Number(document.getElementById('alm').value);s.almocoMin=Number(document.getElementById('almMin').value);s.sabadoMin=Number(document.getElementById('sat').value);s.limiteExtraDia=Number(document.getElementById('lim').value);s.limiteMes=Number(document.getElementById('lm').value);let fm=document.getElementById('fechamentoMes').value;s.fechamentoMes=fm?Number(fm):null;let novoSaldoInicial=s.saldoInicialMin;if(!s.cicloInicio)s.cicloInicio=monthIdFromDate();s.cicloSaldoInicial=novoSaldoInicial;save();render();alert('Configurações salvas.')}
 function parseHM(v){if(v.includes(':')){let p=v.split(':');return Number(p[0])*60+Number(p[1])}return Number(v)||0}
 window.notifyPermission=async function notifyPermission(){if('Notification' in window){let p=await Notification.requestPermission();alert(p==='granted'?'Notificações ativadas.':'Permissão de notificação não concedida.')}else alert('Seu navegador não oferece notificações web.')}
+startAlertMonitor();
 setInterval(()=>{if(tab==='today')renderToday();},30000);
 try {
   render();
