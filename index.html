@@ -68,10 +68,12 @@ dialog{border:0;border-radius:16px;width:min(94vw,480px);padding:0;box-shadow:0 
 
 
 <dialog id="recordsDlg"><div class="modal wide"><button class="close" onclick="document.getElementById('recordsDlg').close()">✕</button>
-<h3>Editar registros de hoje</h3><p class="small muted">Use os horários exatos do relógio-ponto. Você pode corrigir, excluir ou adicionar registros.</p>
+<h3 id="recordsTitle">Editar registros</h3>
+<div class="row"><label style="margin:0;flex:1"><span class="small muted">Dia</span><input id="editDate" type="date" onchange="loadRecordsEditor(this.value)"></label><button class="secondary" onclick="openDayTypeFromEditor()">🏷️ Classificar dia</button></div>
+<p class="small muted">Use os horários exatos do relógio-ponto. Você pode corrigir, excluir ou adicionar registros de qualquer dia, inclusive dias anteriores.</p>
 <div id="recordsList"></div>
 <hr><h4>Adicionar registro</h4><div class="row"><select id="newType"><option value="entry">Entrada</option><option value="exit">Saída</option><option value="lunch_start">Almoço início</option><option value="lunch_end">Almoço retorno</option><option value="int_start">Interrupção início</option><option value="int_end">Interrupção retorno</option></select><input id="newTime" class="timefield" type="text" inputmode="numeric" maxlength="5" placeholder="08:00" autocomplete="off" oninput="maskTime(this)"></div><br><button class="secondary" onclick="addManualRecord()">➕ Adicionar</button>
-<div class="actions" style="margin-top:12px"><button class="green" onclick="saveRecordsEditor()">💾 Salvar alterações</button><button class="red" onclick="clearToday()">🗑️ Limpar dia inteiro</button></div>
+<div class="actions" style="margin-top:12px"><button class="green" onclick="saveRecordsEditor()">💾 Salvar alterações</button><button class="red" onclick="clearEditingDay()">🗑️ Limpar dia</button></div>
 </div></dialog>
 <script>
 const KEY='jornada_v6';
@@ -101,13 +103,16 @@ function addEvent(type,time=null){let d=getDay(todayKey()); if(d.type==='holiday
  if(type==='int_end' && !hasOpen(d,'int_start','int_end')){alert('Não existe interrupção em andamento.');return}
  d.events.push({type,time:time||minToHm(new Date().getHours()*60+new Date().getMinutes())});save();render()}
 function openEdit(type,index=0){openRecordsEditor()}
-window.openRecordsEditor=function openRecordsEditor(){let d=getDay(todayKey());let list=document.getElementById('recordsList');
- if(!d.events.length){list.innerHTML='<div class="notice">Nenhum registro ainda.</div>'}else{list.innerHTML=d.events.map((e,i)=>`<div class="eventrow"><span>${label(e.type)}</span><input class="timefield" type="text" inputmode="numeric" maxlength="5" id="re_${i}" value="${e.time}" oninput="maskTime(this)"><button title="Excluir" onclick="removeRecord(${i})">🗑️</button></div>`).join('')}
- document.getElementById('newTime').value=minToHm(new Date().getHours()*60+new Date().getMinutes());document.getElementById('recordsDlg').showModal()}
-window.removeRecord=function removeRecord(i){let d=getDay(todayKey());d.events.splice(i,1);save();openRecordsEditor()}
-window.addManualRecord=function addManualRecord(){let t=document.getElementById('newType').value,tm=document.getElementById('newTime').value;if(!validTime(tm)){alert('Digite um horário válido no formato HH:MM.');return}getDay(todayKey()).events.push({type:t,time:tm});save();openRecordsEditor()}
-window.saveRecordsEditor=function saveRecordsEditor(){let d=getDay(todayKey());for(let i=0;i<d.events.length;i++){let el=document.getElementById('re_'+i);if(el&&!validTime(el.value)){alert('Há um horário inválido. Use HH:MM.');return}}d.events.forEach((e,i)=>{let el=document.getElementById('re_'+i);if(el)e.time=el.value});d.events.sort((a,b)=>hmToMin(a.time)-hmToMin(b.time));save();document.getElementById('recordsDlg').close();render()}
-window.clearToday=function clearToday(){if(confirm('Apagar TODOS os registros de hoje? Esta ação não pode ser desfeita.')){getDay(todayKey()).events=[];save();document.getElementById('recordsDlg').close();render()}}
+window.openRecordsEditor=function openRecordsEditor(k=todayKey()){editingDate=k;document.getElementById('editDate').value=k;loadRecordsEditor(k);document.getElementById('recordsDlg').showModal()}
+window.loadRecordsEditor=function loadRecordsEditor(k){if(!k)return;editingDate=k;let d=getDay(k),list=document.getElementById('recordsList');document.getElementById('editDate').value=k;document.getElementById('recordsTitle').textContent='Editar registros — '+dateLabel(k);
+ if(!d.events.length){list.innerHTML='<div class="notice">Nenhum registro neste dia.</div>'}else{list.innerHTML=d.events.map((e,i)=>`<div class="eventrow"><span>${label(e.type)}</span><input class="timefield" type="text" inputmode="numeric" maxlength="5" id="re_${i}" value="${e.time}" oninput="maskTime(this)"><button title="Excluir" onclick="removeRecord(${i})">🗑️</button></div>`).join('')}
+ document.getElementById('newTime').value=minToHm(new Date().getHours()*60+new Date().getMinutes());}
+window.openDayTypeFromEditor=function openDayTypeFromEditor(){document.getElementById('dayType').value=getDay(editingDate).type;document.getElementById('dayDlg').showModal()}
+window.removeRecord=function removeRecord(i){let d=getDay(editingDate);d.events.splice(i,1);save();loadRecordsEditor(editingDate)}
+window.addManualRecord=function addManualRecord(){let t=document.getElementById('newType').value,tm=document.getElementById('newTime').value;if(!validTime(tm)){alert('Digite um horário válido no formato HH:MM.');return}getDay(editingDate).events.push({type:t,time:tm});save();loadRecordsEditor(editingDate)}
+window.saveRecordsEditor=function saveRecordsEditor(){let d=getDay(editingDate);for(let i=0;i<d.events.length;i++){let el=document.getElementById('re_'+i);if(el&&!validTime(el.value)){alert('Há um horário inválido. Use HH:MM.');return}}d.events.forEach((e,i)=>{let el=document.getElementById('re_'+i);if(el)e.time=el.value});d.events.sort((a,b)=>hmToMin(a.time)-hmToMin(b.time));save();document.getElementById('recordsDlg').close();render()}
+window.clearEditingDay=function clearEditingDay(){if(confirm('Apagar TODOS os registros deste dia? Esta ação não pode ser desfeita.')){getDay(editingDate).events=[];save();loadRecordsEditor(editingDate);render()}}
+window.clearToday=function clearToday(){editingDate=todayKey();clearEditingDay()}
 window.startLunch=function startLunch(){addEvent('lunch_start')}
 window.endLunch=function endLunch(){addEvent('lunch_end')}
 window.startInt=function startInt(){addEvent('int_start')}
@@ -263,13 +268,24 @@ function renderBank(){
 }
 function renderCalendar(){
  let id=historyMonth,opening=monthOpeningBalance(id);
- let rows=monthKeys(id).map(k=>{let d=getDay(k),c=calcDay(k),daily=c.valid&&c.complete?(c.extra-c.debit):(d.type==='sat_off'&&dow(k)===6?-db.settings.sabadoMin:0); return `<tr><td>${k.slice(8)}/${k.slice(5,7)}</td><td>${d.type}</td><td class="${daily<0?'bad':daily>0?'good':''}">${c.valid&&c.complete?fmtMin(daily):(d.type==='sat_off'&&dow(k)===6?fmtMin(daily):'—')}</td><td>${(c.missing&&k<todayKey())?'🔴':'🟢'}</td><td><button class="secondary small" onclick="openDay('${k}')">Editar</button></td></tr>`}).join('');
- document.getElementById('calendar').innerHTML=`<div class="card"><div class="row" style="align-items:center"><button class="secondary" onclick="historyPrev()">◀</button><div style="text-align:center;font-weight:800;font-size:18px">${formatMonth(id)}</div><button class="secondary" onclick="historyNext()">▶</button></div><div style="text-align:center;margin:9px 0"><button class="secondary small" onclick="historyToday()">📅 Ir para mês atual</button></div><div class="small muted">Saldo de abertura do mês: ${fmtMin(opening)}</div><table><tr><th>Dia</th><th>Tipo</th><th>Saldo do dia</th><th>Ponto</th><th></th></tr>${rows}</table><div class="notice"><b>Saldo ao fim do mês:</b> ${fmtMin(monthCalc(id).saldo)}</div></div>`;
+ let rows=monthKeys(id).map(k=>{let d=getDay(k),c=calcDay(k),daily=c.valid&&c.complete?(c.extra-c.debit):(d.type==='sat_off'&&dow(k)===6?-db.settings.sabadoMin:0); return `<tr><td>${k.slice(8)}/${k.slice(5,7)}</td><td>${d.type}</td><td class="${daily<0?'bad':daily>0?'good':''}">${c.valid&&c.complete?fmtMin(daily):(d.type==='sat_off'&&dow(k)===6?fmtMin(daily):'—')}</td><td>${(c.missing&&k<todayKey())?'🔴':'🟢'}</td><td><button class="secondary small" onclick="openRecordsEditor('${k}')">Editar</button></td></tr>`}).join('');
+ document.getElementById('calendar').innerHTML=`<div class="card"><div class="row" style="align-items:center"><button class="secondary" onclick="historyPrev()">◀</button><div style="text-align:center;font-weight:800;font-size:18px">${formatMonth(id)}</div><button class="secondary" onclick="historyNext()">▶</button></div><div style="text-align:center;margin:9px 0"><button class="secondary small" onclick="historyToday()">📅 Ir para mês atual</button></div><div class="actions"><button class="green" onclick="exportExcel('month')">📊 Exportar mês para Excel</button><button class="secondary" onclick="exportExcel('all')">📥 Exportar todos os registros</button></div><div class="small muted">Saldo de abertura do mês: ${fmtMin(opening)}</div><table><tr><th>Dia</th><th>Tipo</th><th>Saldo do dia</th><th>Ponto</th><th></th></tr>${rows}</table><div class="notice"><b>Saldo ao fim do mês:</b> ${fmtMin(monthCalc(id).saldo)}</div></div>`;
 }
 window.historyPrev=function(){historyMonth=prevMonthId(historyMonth);renderCalendar()}
 window.historyNext=function(){historyMonth=nextMonthId(historyMonth);renderCalendar()}
 window.historyToday=function(){historyMonth=monthIdFromDate();renderCalendar()}
 function prevMonthId(id){let [y,m]=id.split('-').map(Number);m--;if(m===0){m=12;y--;}return `${y}-${String(m).padStart(2,'0')}`}
+
+function excelEscape(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function eventTimes(d,type){return d.events.filter(e=>e.type===type).sort((a,b)=>hmToMin(a.time)-hmToMin(b.time)).map(e=>e.time).join(' / ')}
+window.exportExcel=function exportExcel(scope='all'){
+ let keys=scope==='month'?monthKeys(historyMonth).filter(k=>db.days[k]&&((db.days[k].events&&db.days[k].events.length)||db.days[k].type!=='normal')):Object.keys(db.days).sort();
+ if(!keys.length){alert('Não há registros para exportar.');return}
+ let rows=keys.map(k=>{let d=getDay(k),c=calcDay(k),daily=c.valid&&c.complete?(c.extra-c.debit):(d.type==='sat_off'&&dow(k)===6?-db.settings.sabadoMin:0);return [dateLabel(k),k,d.type,eventTimes(d,'entry'),eventTimes(d,'lunch_start'),eventTimes(d,'lunch_end'),eventTimes(d,'int_start'),eventTimes(d,'int_end'),eventTimes(d,'exit'),c.complete?fmtMin(c.worked):'',c.complete?fmtMin(daily):'',c.missing?'SIM':'NÃO']});
+ let headers=['Data','Data ISO','Tipo do dia','Entrada','Almoço início','Almoço retorno','Interrupção início','Interrupção retorno','Saída','Horas trabalhadas','Saldo do dia','Registro incompleto'];
+ let html=`<!doctype html><html><head><meta charset="utf-8"></head><body><table border="1"><tr>${headers.map(h=>`<th>${excelEscape(h)}</th>`).join('')}</tr>${rows.map(r=>`<tr>${r.map(v=>`<td>${excelEscape(v)}</td>`).join('')}</tr>`).join('')}</table></body></html>`;
+ let blob=new Blob(['\\ufeff',html],{type:'application/vnd.ms-excel;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=(scope==='month'?`controle_jornada_${historyMonth}`:'controle_jornada_todos_registros')+'.xls';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
 
 window.openDay=function openDay(k){editingDate=k;let d=getDay(k);document.getElementById('dayType').value=d.type;document.getElementById('dayDlg').showModal()}
 window.saveDayType=function saveDayType(){getDay(editingDate).type=document.getElementById('dayType').value;save();document.getElementById('dayDlg').close();render()}
